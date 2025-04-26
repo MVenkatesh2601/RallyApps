@@ -1,332 +1,308 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-    <title>Rally Execution Report</title>
+    <title>Test Execution Dashboard</title>
     <script src="https://rally1.rallydev.com/apps/2.1/sdk.js"></script>
     <style>
         body {
-            font-family: 'Segoe UI', sans-serif;
-            margin: 20px;
-            background: #f7f9fb;
+            font-family: Arial, sans-serif;
+            margin: 10px;
         }
-
         .controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }
-
         select, button {
-            padding: 8px 12px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 14px;
-            background: #fff;
-            cursor: pointer;
+            margin-right: 10px;
+            padding: 5px 10px;
         }
-
-        button {
-            background: #0073e6;
-            color: #fff;
-            border: none;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        button:hover {
-            background: #005bb5;
-        }
-
         table {
             width: 100%;
             border-collapse: separate;
-            border-spacing: 0 8px;
+            border-spacing: 0 10px;
         }
-
         th, td {
-            background: #fff;
-            padding: 12px;
             text-align: center;
-            border-bottom: 1px solid #ddd;
+            padding: 10px;
+            border: 1px solid #ccc;
         }
-
         th {
-            background: #0073e6;
-            color: #fff;
+            background-color: #f4f4f4;
         }
-
-        .progress {
-            height: 18px;
-            background: #eee;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-top: 4px;
-        }
-
         .progress-bar {
-            height: 100%;
-            background: #28a745;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 5px;
         }
-
-        .total-row td {
-            font-weight: bold;
-            background: #dbe9f7;
+        .progress-fill {
+            height: 100%;
+            background-color: #4caf50;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+        }
+        .refresh-button {
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            padding: 8px 16px;
+            border-radius: 5px;
+        }
+        .refresh-button:hover {
+            background-color: #45a049;
         }
     </style>
 </head>
-
 <body>
 
-    <div class="controls">
-        <select id="iterationDropdown"></select>
-        <select id="typeDropdown">
-            <option value="all">All</option>
-            <option value="testsets">Test Sets</option>
-            <option value="userstories">User Stories</option>
-        </select>
-        <button onclick="loadData()">
-            🔄 Refresh
-        </button>
-    </div>
+<div class="controls">
+    <select id="iterationDropdown"></select>
+    <select id="typeDropdown">
+        <option value="All">All</option>
+        <option value="TestSet">Test Sets</option>
+        <option value="UserStory">User Stories</option>
+    </select>
+    <button class="refresh-button" onclick="loadData()">🔄 Refresh</button>
+</div>
 
-    <table id="resultsTable">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Type</th>
-                <th>ID</th>
-                <th>Execution %</th>
-                <th>Pass %</th>
-                <th>Not Run</th>
-                <th>Pass</th>
-                <th>Fail</th>
-                <th>Error</th>
-                <th>Blocked</th>
-                <th>Total TC</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
+<table id="resultsTable">
+    <thead>
+        <tr>
+            <th>S.No</th>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Execution %</th>
+            <th>Pass %</th>
+            <th>Not Run</th>
+            <th>Pass</th>
+            <th>Fail</th>
+            <th>Blocked</th>
+            <th>Error</th>
+            <th>Total Test Cases</th>
+        </tr>
+    </thead>
+    <tbody>
+    </tbody>
+</table>
 
-    <script>
-        Rally.onReady(async function () {
-            await loadIterations();
-            loadData();
+<script>
+
+    Rally.onReady(function() {
+        loadIterations();
+        loadData();
+    });
+
+    function loadIterations() {
+        Ext.create('Rally.data.wsapi.Store', {
+            model: 'Iteration',
+            fetch: ['Name', 'ObjectID'],
+            limit: Infinity
+        }).load({
+            callback: function(records) {
+                var dropdown = document.getElementById('iterationDropdown');
+                dropdown.innerHTML = "";
+                records.forEach(function(iteration) {
+                    var option = document.createElement('option');
+                    option.value = iteration.get('ObjectID');
+                    option.text = iteration.get('Name');
+                    dropdown.appendChild(option);
+                });
+            }
+        });
+    }
+
+    function loadData() {
+        const iterationId = document.getElementById('iterationDropdown').value;
+        const type = document.getElementById('typeDropdown').value;
+
+        Promise.all([
+            loadTestSets(iterationId),
+            loadUserStories(iterationId)
+        ]).then(([testSets, userStories]) => {
+
+            const ids = [];
+            if (type === "TestSet" || type === "All") {
+                ids.push(...testSets.map(ts => ({ id: ts.get('FormattedID'), name: ts.get('Name'), type: 'TestSet', objectId: ts.get('ObjectID') })));
+            }
+            if (type === "UserStory" || type === "All") {
+                ids.push(...userStories.map(us => ({ id: us.get('FormattedID'), name: us.get('Name'), type: 'UserStory', objectId: us.get('ObjectID') })));
+            }
+
+            if (ids.length === 0) {
+                renderTable([]);
+                return;
+            }
+
+            loadTestCases(testSets, userStories).then(testCases => {
+                const groupedResults = groupTestCases(ids, testCases);
+                renderTable(groupedResults);
+            });
+        });
+    }
+
+    function loadTestSets(iterationId) {
+        return new Promise((resolve) => {
+            Ext.create('Rally.data.wsapi.Store', {
+                model: 'TestSet',
+                fetch: ['FormattedID', 'Name', 'ObjectID', 'Iteration'],
+                filters: [{ property: 'Iteration.ObjectID', value: iterationId }],
+                limit: Infinity
+            }).load({
+                callback: function(records) {
+                    resolve(records);
+                }
+            });
+        });
+    }
+
+    function loadUserStories(iterationId) {
+        return new Promise((resolve) => {
+            Ext.create('Rally.data.wsapi.Store', {
+                model: 'HierarchicalRequirement',
+                fetch: ['FormattedID', 'Name', 'ObjectID', 'Iteration'],
+                filters: [{ property: 'Iteration.ObjectID', value: iterationId }],
+                limit: Infinity
+            }).load({
+                callback: function(records) {
+                    resolve(records);
+                }
+            });
+        });
+    }
+
+    function loadTestCases(testSets, userStories) {
+        const filters = [];
+
+        testSets.forEach(ts => {
+            filters.push({ property: 'TestSet.ObjectID', value: ts.get('ObjectID') });
         });
 
-        async function loadIterations() {
-            const dropdown = document.getElementById('iterationDropdown');
-            const iterations = await fetchIterations();
-            iterations.forEach(iter => {
-                const option = document.createElement('option');
-                option.value = iter.id;
-                option.textContent = iter.name;
-                dropdown.appendChild(option);
-            });
+        userStories.forEach(us => {
+            filters.push({ property: 'WorkProduct.ObjectID', value: us.get('ObjectID') });
+        });
+
+        if (filters.length === 0) {
+            return Promise.resolve([]);
         }
 
-        function fetchIterations() {
-            return new Promise((resolve, reject) => {
-                Ext.create('Rally.data.wsapi.Store', {
-                    model: 'Iteration',
-                    fetch: ['Name', 'ObjectID'],
-                    autoLoad: true,
-                    listeners: {
-                        load: function (store, records) {
-                            const iterations = records.map(record => ({
-                                id: record.get('ObjectID'),
-                                name: record.get('Name')
-                            }));
-                            resolve(iterations);
-                        }
-                    }
-                });
+        const rallyFilters = Rally.data.wsapi.Filter.or(filters);
+
+        return new Promise((resolve) => {
+            Ext.create('Rally.data.wsapi.Store', {
+                model: 'TestCase',
+                fetch: ['FormattedID', 'Name', 'LastVerdict', 'TestSet', 'WorkProduct'],
+                filters: rallyFilters,
+                limit: Infinity
+            }).load({
+                callback: function(records) {
+                    resolve(records);
+                }
             });
-        }
+        });
+    }
 
-        function fetchTestSets(iterationId) {
-            return new Promise((resolve, reject) => {
-                Ext.create('Rally.data.wsapi.Store', {
-                    model: 'TestSet',
-                    fetch: ['FormattedID', 'ObjectID'],
-                    filters: [{ property: 'Iteration.ObjectID', value: iterationId }],
-                    autoLoad: true,
-                    listeners: {
-                        load: function (store, records) {
-                            const testSets = records.map(record => ({
-                                id: record.get('FormattedID'),
-                                objectId: record.get('ObjectID'),
-                                url: `/detail/testset/${record.get('ObjectID')}`,
-                                testCases: []
-                            }));
-                            resolve(testSets);
-                        }
-                    }
-                });
-            });
-        }
-
-        function fetchUserStories(iterationId) {
-            return new Promise((resolve, reject) => {
-                Ext.create('Rally.data.wsapi.Store', {
-                    model: 'HierarchicalRequirement',
-                    fetch: ['FormattedID', 'ObjectID'],
-                    filters: [{ property: 'Iteration.ObjectID', value: iterationId }],
-                    autoLoad: true,
-                    listeners: {
-                        load: function (store, records) {
-                            const userStories = records.map(record => ({
-                                id: record.get('FormattedID'),
-                                objectId: record.get('ObjectID'),
-                                url: `/detail/userstory/${record.get('ObjectID')}`,
-                                testCases: []
-                            }));
-                            resolve(userStories);
-                        }
-                    }
-                });
-            });
-        }
-
-        function fetchTestCases(iterationId) {
-            return new Promise((resolve, reject) => {
-                Ext.create('Rally.data.wsapi.Store', {
-                    model: 'TestCase',
-                    fetch: ['LastVerdict', 'WorkProduct', 'TestSet', 'ObjectID'],
-                    filters: [{ property: 'Iteration.ObjectID', value: iterationId }],
-                    autoLoad: true,
-                    listeners: {
-                        load: function (store, records) {
-                            const testCases = records.map(record => ({
-                                lastVerdict: record.get('LastVerdict') || 'Not Run',
-                                workProductId: record.get('WorkProduct') ? record.get('WorkProduct').ObjectID : null,
-                                testSetId: record.get('TestSet') ? record.get('TestSet').ObjectID : null
-                            }));
-                            resolve(testCases);
-                        }
-                    }
-                });
-            });
-        }
-
-        async function loadData() {
-            const iterationId = document.getElementById('iterationDropdown').value;
-            const type = document.getElementById('typeDropdown').value;
-
-            let data = [];
-            let testSets = [];
-            let userStories = [];
-
-            if (type === 'testsets' || type === 'all') {
-                testSets = await fetchTestSets(iterationId);
-            }
-            if (type === 'userstories' || type === 'all') {
-                userStories = await fetchUserStories(iterationId);
-            }
-
-            const testCases = await fetchTestCases(iterationId);
-
-            testSets.forEach(ts => {
-                ts.testCases = testCases.filter(tc => tc.testSetId === ts.objectId);
-                ts.type = 'Test Set';
-            });
-
-            userStories.forEach(us => {
-                us.testCases = testCases.filter(tc => tc.workProductId === us.objectId);
-                us.type = 'User Story';
-            });
-
-            data = [...testSets, ...userStories];
-
-            renderTable(data);
-        }
-
-        function renderTable(data) {
-            const tbody = document.getElementById('resultsTable').querySelector('tbody');
-            tbody.innerHTML = '';
-
-            let total = {
-                notrun: 0,
+    function groupTestCases(ids, testCases) {
+        const results = ids.map(item => {
+            return {
+                id: item.id,
+                name: item.name,
+                type: item.type,
+                total: 0,
                 pass: 0,
                 fail: 0,
                 error: 0,
                 blocked: 0,
-                total: 0
+                notrun: 0
             };
+        });
 
-            data.forEach((item, index) => {
-                let counts = {
-                    notrun: 0,
-                    pass: 0,
-                    fail: 0,
-                    error: 0,
-                    blocked: 0
-                };
+        results.forEach(group => {
+            testCases.forEach(tc => {
+                if ((group.type === 'TestSet' && tc.get('TestSet') && tc.get('TestSet').ObjectID === group.objectId) ||
+                    (group.type === 'UserStory' && tc.get('WorkProduct') && tc.get('WorkProduct').ObjectID === group.objectId)) {
 
-                item.testCases.forEach(tc => {
-                    switch (tc.lastVerdict) {
-                        case 'Pass': counts.pass++; break;
-                        case 'Fail': counts.fail++; break;
-                        case 'Error': counts.error++; break;
-                        case 'Blocked': counts.blocked++; break;
-                        default: counts.notrun++; break;
+                    group.total++;
+                    switch (tc.get('LastVerdict')) {
+                        case "Pass": group.pass++; break;
+                        case "Fail": group.fail++; break;
+                        case "Error": group.error++; break;
+                        case "Blocked": group.blocked++; break;
+                        default: group.notrun++; break;
                     }
-                });
-
-                const totalCount = item.testCases.length;
-                const execution = totalCount > 0 ? ((totalCount - counts.notrun) / totalCount) * 100 : 0;
-                const passPercentage = totalCount > 0 ? (counts.pass / totalCount) * 100 : 0;
-
-                total.notrun += counts.notrun;
-                total.pass += counts.pass;
-                total.fail += counts.fail;
-                total.error += counts.error;
-                total.blocked += counts.blocked;
-                total.total += totalCount;
-
-                const row = `
-                    <tr>
-                        <td>${index + 1}</td>
-                        <td>${item.type}</td>
-                        <td><a href="${item.url}" target="_blank">${item.id}</a></td>
-                        <td>
-                            ${execution.toFixed(1)}%
-                            <div class="progress"><div class="progress-bar" style="width: ${execution}%"></div></div>
-                        </td>
-                        <td>
-                            ${passPercentage.toFixed(1)}%
-                            <div class="progress"><div class="progress-bar" style="width: ${passPercentage}%"></div></div>
-                        </td>
-                        <td>${counts.notrun}</td>
-                        <td>${counts.pass}</td>
-                        <td>${counts.fail}</td>
-                        <td>${counts.error}</td>
-                        <td>${counts.blocked}</td>
-                        <td>${totalCount}</td>
-                    </tr>
-                `;
-                tbody.insertAdjacentHTML('beforeend', row);
+                }
             });
+        });
 
-            // Add totals row
-            const totalRow = `
-                <tr class="total-row">
-                    <td colspan="5">Total</td>
-                    <td>${total.notrun}</td>
-                    <td>${total.pass}</td>
-                    <td>${total.fail}</td>
-                    <td>${total.error}</td>
-                    <td>${total.blocked}</td>
-                    <td>${total.total}</td>
-                </tr>
-            `;
-            tbody.insertAdjacentHTML('beforeend', totalRow);
+        return results;
+    }
+
+    function renderTable(data) {
+        const tbody = document.getElementById('resultsTable').getElementsByTagName('tbody')[0];
+        tbody.innerHTML = "";
+        let totalTotal = 0, totalPass = 0, totalFail = 0, totalError = 0, totalBlocked = 0, totalNotRun = 0;
+
+        data.forEach((item, index) => {
+            const row = tbody.insertRow();
+            row.insertCell(0).innerText = index + 1;
+            row.insertCell(1).innerText = item.id;
+            row.insertCell(2).innerText = item.name;
+
+            const execPercent = item.total > 0 ? ((item.pass + item.fail + item.error + item.blocked) / item.total) * 100 : 0;
+            const passPercent = item.total > 0 ? (item.pass / item.total) * 100 : 0;
+
+            row.insertCell(3).innerHTML = getProgressBar(execPercent);
+            row.insertCell(4).innerHTML = getProgressBar(passPercent);
+
+            row.insertCell(5).innerText = item.notrun;
+            row.insertCell(6).innerText = item.pass;
+            row.insertCell(7).innerText = item.fail;
+            row.insertCell(8).innerText = item.blocked;
+            row.insertCell(9).innerText = item.error;
+            row.insertCell(10).innerText = item.total;
+
+            totalTotal += item.total;
+            totalPass += item.pass;
+            totalFail += item.fail;
+            totalError += item.error;
+            totalBlocked += item.blocked;
+            totalNotRun += item.notrun;
+        });
+
+        if (data.length > 0) {
+            const row = tbody.insertRow();
+            row.insertCell(0).innerText = '';
+            row.insertCell(1).innerText = 'Total';
+            row.insertCell(2).innerText = '';
+
+            const execPercent = totalTotal > 0 ? ((totalPass + totalFail + totalError + totalBlocked) / totalTotal) * 100 : 0;
+            const passPercent = totalTotal > 0 ? (totalPass / totalTotal) * 100 : 0;
+
+            row.insertCell(3).innerHTML = getProgressBar(execPercent);
+            row.insertCell(4).innerHTML = getProgressBar(passPercent);
+
+            row.insertCell(5).innerText = totalNotRun;
+            row.insertCell(6).innerText = totalPass;
+            row.insertCell(7).innerText = totalFail;
+            row.insertCell(8).innerText = totalBlocked;
+            row.insertCell(9).innerText = totalError;
+            row.insertCell(10).innerText = totalTotal;
         }
-    </script>
+    }
+
+    function getProgressBar(percent) {
+        return `
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${percent}%; background-color: ${percent >= 80 ? '#4caf50' : (percent >= 50 ? '#ff9800' : '#f44336')}">
+                    ${percent.toFixed(1)}%
+                </div>
+            </div>
+        `;
+    }
+
+</script>
 
 </body>
-
 </html>
+
