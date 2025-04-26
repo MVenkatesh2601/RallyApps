@@ -122,22 +122,32 @@
             loadUserStories(iterationId)
         ]).then(([testSets, userStories]) => {
 
-            const ids = [];
-            if (type === "TestSet" || type === "All") {
-                ids.push(...testSets.map(ts => ({ id: ts.get('FormattedID'), name: ts.get('Name'), type: 'TestSet', objectId: ts.get('ObjectID') })));
+            let items = [];
+            if (type === "All" || type === "TestSet") {
+                items.push(...testSets.map(ts => ({
+                    id: ts.get('FormattedID'),
+                    name: ts.get('Name'),
+                    type: 'TestSet',
+                    objectId: ts.get('ObjectID')
+                })));
             }
-            if (type === "UserStory" || type === "All") {
-                ids.push(...userStories.map(us => ({ id: us.get('FormattedID'), name: us.get('Name'), type: 'UserStory', objectId: us.get('ObjectID') })));
+            if (type === "All" || type === "UserStory") {
+                items.push(...userStories.map(us => ({
+                    id: us.get('FormattedID'),
+                    name: us.get('Name'),
+                    type: 'UserStory',
+                    objectId: us.get('ObjectID')
+                })));
             }
 
-            if (ids.length === 0) {
+            if (items.length === 0) {
                 renderTable([]);
                 return;
             }
 
-            loadTestCases(testSets, userStories).then(testCases => {
-                const groupedResults = groupTestCases(ids, testCases);
-                renderTable(groupedResults);
+            loadTestCases(items).then(testCases => {
+                const results = groupTestCases(items, testCases);
+                renderTable(results);
             });
         });
     }
@@ -172,15 +182,14 @@
         });
     }
 
-    function loadTestCases(testSets, userStories) {
+    function loadTestCases(items) {
         const filters = [];
-
-        testSets.forEach(ts => {
-            filters.push({ property: 'TestSet.ObjectID', value: ts.get('ObjectID') });
-        });
-
-        userStories.forEach(us => {
-            filters.push({ property: 'WorkProduct.ObjectID', value: us.get('ObjectID') });
+        items.forEach(item => {
+            if (item.type === 'TestSet') {
+                filters.push({ property: 'TestSet.ObjectID', value: item.objectId });
+            } else if (item.type === 'UserStory') {
+                filters.push({ property: 'WorkProduct.ObjectID', value: item.objectId });
+            }
         });
 
         if (filters.length === 0) {
@@ -192,7 +201,7 @@
         return new Promise((resolve) => {
             Ext.create('Rally.data.wsapi.Store', {
                 model: 'TestCase',
-                fetch: ['FormattedID', 'Name', 'LastVerdict', 'TestSet', 'WorkProduct'],
+                fetch: ['FormattedID', 'LastVerdict', 'TestSet', 'WorkProduct'],
                 filters: rallyFilters,
                 limit: Infinity
             }).load({
@@ -203,33 +212,30 @@
         });
     }
 
-    function groupTestCases(ids, testCases) {
-        const results = ids.map(item => {
-            return {
-                id: item.id,
-                name: item.name,
-                type: item.type,
-                total: 0,
-                pass: 0,
-                fail: 0,
-                error: 0,
-                blocked: 0,
-                notrun: 0
-            };
-        });
+    function groupTestCases(items, testCases) {
+        const results = items.map(item => ({
+            id: item.id,
+            name: item.name,
+            total: 0,
+            pass: 0,
+            fail: 0,
+            blocked: 0,
+            error: 0,
+            notrun: 0
+        }));
 
-        results.forEach(group => {
-            testCases.forEach(tc => {
-                if ((group.type === 'TestSet' && tc.get('TestSet') && tc.get('TestSet').ObjectID === group.objectId) ||
-                    (group.type === 'UserStory' && tc.get('WorkProduct') && tc.get('WorkProduct').ObjectID === group.objectId)) {
+        testCases.forEach(tc => {
+            results.forEach(result => {
+                if ((result.id.startsWith('TS') && tc.get('TestSet') && tc.get('TestSet').ObjectID === result.objectId) ||
+                    (!result.id.startsWith('TS') && tc.get('WorkProduct') && tc.get('WorkProduct').ObjectID === result.objectId)) {
 
-                    group.total++;
+                    result.total++;
                     switch (tc.get('LastVerdict')) {
-                        case "Pass": group.pass++; break;
-                        case "Fail": group.fail++; break;
-                        case "Error": group.error++; break;
-                        case "Blocked": group.blocked++; break;
-                        default: group.notrun++; break;
+                        case "Pass": result.pass++; break;
+                        case "Fail": result.fail++; break;
+                        case "Error": result.error++; break;
+                        case "Blocked": result.blocked++; break;
+                        default: result.notrun++; break;
                     }
                 }
             });
@@ -241,7 +247,7 @@
     function renderTable(data) {
         const tbody = document.getElementById('resultsTable').getElementsByTagName('tbody')[0];
         tbody.innerHTML = "";
-        let totalTotal = 0, totalPass = 0, totalFail = 0, totalError = 0, totalBlocked = 0, totalNotRun = 0;
+        let totalTotal = 0, totalPass = 0, totalFail = 0, totalBlocked = 0, totalError = 0, totalNotRun = 0;
 
         data.forEach((item, index) => {
             const row = tbody.insertRow();
@@ -265,8 +271,8 @@
             totalTotal += item.total;
             totalPass += item.pass;
             totalFail += item.fail;
-            totalError += item.error;
             totalBlocked += item.blocked;
+            totalError += item.error;
             totalNotRun += item.notrun;
         });
 
@@ -276,7 +282,7 @@
             row.insertCell(1).innerText = 'Total';
             row.insertCell(2).innerText = '';
 
-            const execPercent = totalTotal > 0 ? ((totalPass + totalFail + totalError + totalBlocked) / totalTotal) * 100 : 0;
+            const execPercent = totalTotal > 0 ? ((totalPass + totalFail + totalBlocked + totalError) / totalTotal) * 100 : 0;
             const passPercent = totalTotal > 0 ? (totalPass / totalTotal) * 100 : 0;
 
             row.insertCell(3).innerHTML = getProgressBar(execPercent);
@@ -305,4 +311,3 @@
 
 </body>
 </html>
-
